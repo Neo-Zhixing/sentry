@@ -398,13 +398,13 @@ export type EventMetadata = {
 
 export type EventAttachment = {
   id: string;
-  dateCreated: string;
+  dateCreated: string; // y
   headers: Object;
-  mimetype: string;
-  name: string;
+  mimetype: string; // y
+  name: string; // y
   sha1: string;
-  size: number;
-  type: string;
+  size: number; // y
+  type: string; // y
   event_id: string;
 };
 

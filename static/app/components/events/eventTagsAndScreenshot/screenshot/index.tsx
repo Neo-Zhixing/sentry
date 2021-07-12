@@ -1,14 +1,13 @@
 import {Fragment, useEffect, useState} from 'react';
 import styled from '@emotion/styled';
 
+import {openModal} from 'app/actionCreators/modal';
 import {Client} from 'app/api';
 import Role from 'app/components/acl/role';
 import MenuItemActionLink from 'app/components/actions/menuItemActionLink';
 import Button from 'app/components/button';
 import ButtonBar from 'app/components/buttonBar';
 import DropdownLink from 'app/components/dropdownLink';
-import ImageViewer from 'app/components/events/attachmentViewers/imageViewer';
-import LoadingIndicator from 'app/components/loadingIndicator';
 import {Panel, PanelBody, PanelFooter} from 'app/components/panels';
 import {IconDownload, IconEllipsis} from 'app/icons';
 import {t} from 'app/locale';
@@ -19,8 +18,8 @@ import withApi from 'app/utils/withApi';
 
 import DataSection from '../dataSection';
 
-import EmptyState from './emptyState';
-import {platformsMobileWithAttachmentsFeature} from './utils';
+import ImageVisualization from './imageVisualization';
+import Modal, {modalCss} from './modal';
 
 type Props = {
   event: Event;
@@ -33,7 +32,6 @@ function Screenshot({event, api, organization, projectSlug}: Props) {
   const [attachments, setAttachments] = useState<EventAttachment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const orgSlug = organization.slug;
-  const eventPlatform = event.platform;
 
   useEffect(() => {
     fetchData();
@@ -59,35 +57,37 @@ function Screenshot({event, api, organization, projectSlug}: Props) {
     }
   }
 
-  function hasPreview(attachment: EventAttachment) {
-    switch (attachment.mimetype) {
-      case 'image/jpeg':
-      case 'image/png':
-      case 'image/gif':
-        return true;
-      default:
-        return false;
-    }
+  function hasScreenshot(attachment: EventAttachment) {
+    const {name, mimetype} = attachment;
+    // return (
+    //   (mimetype === 'image/jpeg' || mimetype === 'image/png') && name === 'screenshot'
+    // );
+    return mimetype === 'image/jpeg' || mimetype === 'image/png';
   }
 
-  function renderContent() {
-    if (isLoading) {
-      return <LoadingIndicator mini />;
-    }
+  function handleOpenVisualizationModal(eventAttachment: EventAttachment) {
+    openModal(
+      modalProps => (
+        <Modal
+          {...modalProps}
+          event={event}
+          orgSlug={orgSlug}
+          projectSlug={projectSlug}
+          eventAttachment={eventAttachment}
+        />
+      ),
+      {modalCss}
+    );
+  }
 
-    const firstAttachmenteWithPreview = attachments.find(hasPreview);
-
-    if (!firstAttachmenteWithPreview) {
-      return <EmptyState platform={eventPlatform} />;
-    }
-
-    const downloadUrl = `/api/0/projects/${organization.slug}/${projectSlug}/events/${event.id}/attachments/${firstAttachmenteWithPreview.id}/`;
+  function renderContent(screenshotAttachment: EventAttachment) {
+    const downloadUrl = `/api/0/projects/${organization.slug}/${projectSlug}/events/${event.id}/attachments/${screenshotAttachment.id}/`;
 
     return (
       <Fragment>
         <StyledPanelBody>
-          <StyledImageViewer
-            attachment={firstAttachmenteWithPreview}
+          <ImageVisualization
+            attachment={screenshotAttachment}
             orgId={orgSlug}
             projectId={projectSlug}
             event={event}
@@ -95,7 +95,12 @@ function Screenshot({event, api, organization, projectSlug}: Props) {
         </StyledPanelBody>
         <StyledPanelFooter>
           <StyledButtonbar gap={1}>
-            <Button size="xsmall">{t('View screenshot')}</Button>
+            <Button
+              size="xsmall"
+              onClick={() => handleOpenVisualizationModal(screenshotAttachment)}
+            >
+              {t('View screenshot')}
+            </Button>
             <DropdownLink
               caret={false}
               customTitle={
@@ -122,22 +127,15 @@ function Screenshot({event, api, organization, projectSlug}: Props) {
     );
   }
 
-  // the UI should only render the screenshots feature in events with platforms that support screenshots
-  if (
-    !eventPlatform ||
-    !platformsMobileWithAttachmentsFeature.includes(eventPlatform as any)
-  ) {
-    return null;
-  }
-
   return (
     <Role role={organization.attachmentsRole}>
       {({hasRole}) => {
-        if (!hasRole) {
-          // if the user has no access to the attachments,
-          // the UI shall not display the screenshot section
+        const screenshotAttachment = attachments.find(hasScreenshot);
+
+        if (!hasRole || isLoading || !screenshotAttachment) {
           return null;
         }
+
         return (
           <DataSection
             title={t('Screenshots')}
@@ -145,7 +143,7 @@ function Screenshot({event, api, organization, projectSlug}: Props) {
               'Screenshots help identify what the user saw when the exception happened'
             )}
           >
-            <StyledPanel>{renderContent()}</StyledPanel>
+            <StyledPanel>{renderContent(screenshotAttachment)}</StyledPanel>
           </DataSection>
         );
       }}
@@ -163,6 +161,7 @@ const StyledPanel = styled(Panel)`
   margin-bottom: 0;
   min-width: 175px;
   min-height: 200px;
+  overflow: hidden;
 `;
 
 const StyledPanelBody = styled(PanelBody)`
@@ -180,16 +179,5 @@ const StyledButtonbar = styled(ButtonBar)`
   justify-content: space-between;
   .dropdown {
     height: 24px;
-  }
-`;
-
-const StyledImageViewer = styled(ImageViewer)`
-  padding: 0;
-  height: 100%;
-  img {
-    width: auto;
-    height: 100%;
-    object-fit: cover;
-    flex: 1;
   }
 `;
