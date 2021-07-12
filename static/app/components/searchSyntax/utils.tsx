@@ -2,6 +2,130 @@ import {LocationRange} from 'pegjs';
 
 import {Token, TokenConverter, TokenResult} from './parser';
 
+/**
+ * Used internally within treeResultLocator to stop recursion once we've
+ * located a matched result.
+ */
+class TokenResultFound extends Error {
+  result: any;
+
+  constructor(result: any) {
+    super();
+    this.result = result;
+  }
+}
+
+/**
+ * Used as the marker to skip token traversal in treeResultLocator
+ */
+const skipToken = Symbol('Returned to skip visiting a token');
+
+type VisitorFn = (opts: {
+  /**
+   * The token being visited
+   */
+  token: TokenResult<Token>;
+  /**
+   * Call this to return the provided value as the result of treeResultLocator
+   */
+  foundResult: (result: any) => TokenResultFound;
+  /**
+   * Return this to skip visiting any inner tokens
+   */
+  skipToken: typeof skipToken;
+}) => null | TokenResultFound | typeof skipToken;
+
+type TreeResultLocatorOpts = {
+  /**
+   * The tree to visit
+   */
+  tree: TokenResult<Token>[];
+  /**
+   * A function used to check if we've found the result in the node we're
+   * visiting. May also indicate that we want to skip any further traversal of
+   * inner nodes.
+   */
+  visitorTest: VisitorFn;
+  /**
+   * The value to return when returnValue was never called and all nodes of the
+   * search tree were visited.
+   */
+  noResultValue: any;
+};
+
+/**
+ * Utility function to visit every Token node within an AST tree (in DFS order)
+ * and apply a test method that may choose to return some value from that node.
+ *
+ * You must call the `returnValue` method for a result to be returned.
+ *
+ * When returnValue is never called and all nodes of the search tree have been
+ * visited the noResultValue will be returned.
+ */
+export function treeResultLocator<T>({
+  tree,
+  visitorTest,
+  noResultValue,
+}: TreeResultLocatorOpts): T {
+  const foundResult = (result: any) => new TokenResultFound(result);
+
+  const nodeVisitor = (token: TokenResult<Token>) => {
+    const result = visitorTest({token, foundResult, skipToken});
+
+    // Bubble the result back up.
+    //
+    // XXX: Using a throw here is a bit easier than threading the return value
+    // back up through the recursive call tree.
+    if (result instanceof TokenResultFound) {
+      throw result;
+    }
+
+    // Don't traverse into any nested tokens
+    if (result === skipToken) {
+      return;
+    }
+
+    switch (token.type) {
+      case Token.Filter:
+        nodeVisitor(token.key);
+        nodeVisitor(token.value);
+        break;
+      case Token.KeyExplicitTag:
+        nodeVisitor(token.key);
+        break;
+      case Token.KeyAggregate:
+        nodeVisitor(token.name);
+        token.args && nodeVisitor(token.args);
+        nodeVisitor(token.argsSpaceBefore);
+        nodeVisitor(token.argsSpaceAfter);
+        break;
+      case Token.LogicGroup:
+        token.inner.forEach(nodeVisitor);
+        break;
+      case Token.KeyAggregateArgs:
+        token.args.forEach(v => nodeVisitor(v.value));
+        break;
+      case Token.ValueNumberList:
+      case Token.ValueTextList:
+        token.items.forEach((v: any) => nodeVisitor(v.value));
+        break;
+      default:
+    }
+  };
+
+  try {
+    tree.forEach(nodeVisitor);
+  } catch (error) {
+    if (error instanceof TokenResultFound) {
+      return error.result;
+    }
+
+    throw error;
+  }
+
+  return noResultValue;
+}
+
 type TreeTransformerOpts = {
   /**
    * The tree to transform
